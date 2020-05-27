@@ -1,0 +1,439 @@
+---
+title: 'Logit Estimates and Odds Ratios, Probit Estimates '
+author: "Alan, Free, and Mai"
+date: "02/29/2020"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include = FALSE}
+## Course: ECON 5300
+## Date: February 29, 2020
+## Authors: Alan, Free, and Mai
+
+```
+
+```{r clear env., message = FALSE, echo = FALSE}
+# Clear environment of variables and functions
+rm(list = ls(all = TRUE))
+
+# Clear environment of packages
+if(is.null(sessionInfo()$otherPkgs) == FALSE)lapply(paste("package:", names(sessionInfo()$otherPkgs), sep=""), detach, character.only = TRUE, unload = TRUE)
+
+```
+
+# Assignment Description
+
++ MLD Assignment - Preliminary Economic Estimates
+
++ Research Questions:
+
+    - Do mortgage lending institutions discriminate against minorities? 
+
+
+# Load Libraries
+
+```{r libraries, message = FALSE}
+# Load libraries
+library(tidyverse)
+library(stargazer)
+library(psych)
+library(corrplot)
+library(lmtest) #BGP test
+library(rms) #likelihood test
+library(kableExtra) 
+
+```
+
+
+#Load and transform data
+
+```{r load data}
+
+# Load data
+df <- read.csv("mld[5197].csv", header = TRUE) 
+
+#remove rows in MARRIED that is not 0 or 1
+df <- subset(df, df$MARRIED == 1 | df$MARRIED == 0)
+
+#remove rows in MALE that is not 0 or 1
+df <- subset(df, df$MALE == 1 | df$MALE == 0)
+
+#remove rows in GDLIN that is not 0 or 1
+df <- subset(df, df$GDLIN == 1 | df$GDLIN ==0)
+
+#drop unused factor level
+is.na(df$MARRIED) <- df$MARRIED == "."
+is.na(df$MARRIED) <- df$MARRIED == ","
+df$MARRIED <- factor(df$MARRIED)
+
+#drop unused factor level
+is.na(df$MALE) <- df$MALE == "."
+is.na(df$MALE) <- df$MALE == ","
+df$MALE <- factor(df$MALE)
+
+#convert to int
+df$MALE <- as.numeric(df$MALE)
+df$MARRIED <- as.numeric(df$MARRIED) 
+
+#recode MARRIED, MALE to 0 and 1 values
+df$MARRIED <- ifelse(df$MARRIED == 2, 1, 0) #1 = married
+df$MALE <- ifelse(df$MALE == 2, 1, 0) #1 = male, 0 = female
+
+#change loan to value in percentage terms
+df$LOANPRC <- df$LOANPRC * 100
+
+
+#creating four subsamples, one total sample and rest based on race
+totalSample <- df
+white <- df[df$BLACK == 0 & df$HISPAN == 0, ] #non-hispanic white sample
+black <- df[df$BLACK == 1,] #non-hispanic black sample
+hisp <- df[df$HISPAN == 1,] #hispanic sample
+
+#create dummy variables for white, female, race (for bar graphs)
+df$WHITE <- ifelse(df$BLACK==0 & df$HISPAN==0, 1, 0)
+df$RACE <- ifelse(df$WHITE==1, "WHITE", ifelse(df$BLACK==1, "BLACK", "HISPANIC"))
+df$FEMALE <- ifelse(df$MALE==1,0,1)
+df$SEX <- ifelse(df$MALE==1, "MALE", "FEMALE")
+df$RACE <- as.factor(df$RACE)
+df$SEX <- as.factor(df$SEX)
+```
+
+
+```{r}
+
+# uni-variate non-graphical EDA for all samples
+stargazer(totalSample, type = "text", header = FALSE, median = TRUE)
+stargazer(white, type = "text", header = FALSE, median = TRUE)
+stargazer(black, type = "text", header = FALSE, median = TRUE)
+stargazer(hisp, type = "text", header = FALSE, median = TRUE)
+
+```
+
++ total sample
+
+    - there were some clear outliers/errors in the data so we cleaned that up. e.g., guideline had 666 for two values, but should only be 0 and 1
+    - majority of total sample is white male
+    - more than half the sample is married
+    - most were approved for loan (mean = 0.823)
+    - most passed credit history guidelines
+    - seems 32% of total income from sample is from other obligations
+    - interesting max LOANPRC > 1 meaning bank lent more than purchase price 
+
++ white
+
+    - married is very similar to total sample, as expected as original sample was made up of mostly white 
+    - mean of passing credit guideline increase. high passing rate for white sample
+    - median decreases slightly for other obligation as percentage of total income. perhaps this is attributed to white sample having to not work other jobs to make ends meet? able to enjoy higher income from one stable income source?
+    - majority are male
+    - majority (>0.9) are approved for loan, higher than total sample
+    - loanprc is very similar to total sample
+
++ black
+
+    - similar marriage statistics 
+    - noticeable difference in passing credit guidelines between white and black. Q1 of interquartile range changed from 1 to 0 between white and black. this relationship can also been seen by comparing the means.
+    -median for obligations that make up percentage of income is higher for blacks, supporting the theory that they might have more than one source of income to support living, leading to conclusion that perhaps they get paid less?
+    - noticeable difference in male/female population between white and black
+    - clear decrease in approval of loans between white and black. evidenced by difference in Q1 IQR and means difference
+    - conclusion for loanprc could be many things: it's clear that at each IQR range black sample has higher statistic. this could either mean their denominator (purchase amount) is lower, or they are receiving less loan amounts for cheaper houses
+
++ hispanic
+
+    - highest mean of marriage out of three races
+    - hispanic sample has higher passing credit guideline rate than black sample, but still not as high as white sample
+    - interesting that minimum for obrat (other obligations contribution to total income) is NOT 0, and is 14% for a 108 person sample for the hispanic population. EVERY single person has more than one obligation that contributes to their total income, indicating a need for other sources of income to sustain living
+    - ~80% is male
+    - higher rate of approval than black sample, but less than white sample
+    - LOANPRC is highest at every IQR range for hispanic sample than white, black. many interpretations here.
+    
+# Base EDA
+
+```{r view data}
+# Generate histogram for select variable(s)
+# marital status
+par(mfrow = c(2,2))
+  hist(totalSample$MARRIED,col = "orange")
+  hist(white$MARRIED, col = "orange")
+  hist(black$MARRIED, col = "orange")
+  hist(hisp$MARRIED, col = "orange")
+```
+
++ similar marriage pattern comparing three races
+
+    - black sample has closest number of unmarried to married
+    
+
+
+```{r view data}
+# Generate histogram for select variable(s)
+# passing credit guidelines
+par(mfrow = c(2,2))
+  hist(totalSample$GDLIN,col = "orange")
+  hist(white$GDLIN, col = "orange")
+  hist(black$GDLIN, col = "orange")
+  hist(hisp$GDLIN, col = "orange")
+```
+
++ clear that black sample has the highest percentage of failing credit passing guidelines
+
+    - confirms what we saw in descriptive statistics
+    - white sample has lowest fail rate of passing credit guidelines
+    
+
+```{r view data}
+# Generate histogram for select variable(s)
+# obligations as a percentage of total income
+par(mfrow = c(2,2))
+  hist(totalSample$OBRAT,col = "orange")
+  hist(white$OBRAT, col = "orange")
+  hist(black$OBRAT, col = "orange")
+  hist(hisp$OBRAT, col = "orange")
+```
+
++ interesting to see that the max percentage for white sample is around 50%
+
+    - indicates that no more than 50% of total income comes from other obligations
+    - supports hypothesis that white group earn enough from primary income source, more so than black and hispanic group
+    - black and hispanic have similar histogram shapes, but notably different in two areas
+    - black sample has more frequency in the right end of the histogram, indicating more black individuals and families have higher % of their income from additional obligations
+    - hispanic have a much larger number of people in the left side of graph, as shown in descriptive statistics, that all hispanic sample in this dataset have other obligations to help support income.
+    
+    
+```{r view data}
+# Generate histogram for select variable(s)
+#MALE or not
+par(mfrow = c(2,2))
+  hist(totalSample$MALE,col = "orange")
+  hist(white$MALE, col = "orange")
+  hist(black$MALE, col = "orange")
+  hist(hisp$MALE, col = "orange")
+```
+
++ not much to visualize difference between what we saw in descriptive statistics
+
+    - black sample group has higher percentage of females than the two other race groups
+    
+```{r view data}
+# Generate histogram for select variable(s)
+# Approval or not
+par(mfrow = c(2,2))
+  hist(totalSample$APPROVE,col = "orange")
+  hist(white$APPROVE, col = "orange")
+  hist(black$APPROVE, col = "orange")
+  hist(hisp$APPROVE, col = "orange")
+```
+
++  as seen, white sample group has the absolute lowest fail rate to gain loan approval
+
+    - black sample group has almost 1/3 of its sample size fail to receive loan approval. HUGE!
+    - hispanic sample group fares a little better, but noticeably more failed loan approvals than white population
+    
+```{r view data}
+# Generate histogram for select variable(s)
+# LOANPRC
+par(mfrow = c(2,2))
+  hist(totalSample$LOANPRC,col = "orange")
+  hist(white$LOANPRC, col = "orange")
+  hist(black$LOANPRC, col = "orange")
+  hist(hisp$LOANPRC, col = "orange")
+```
+
++ harder to interpret this graph from histogram
+
+    - majority of loan amount to purchase amount is centered around 0.7 for white population
+    - this number is higher for both black and hispanic population
+    - as discussed above, there could be a number of factors
+    - either a higher loan amount on average approved for black and hispanic, or lower purchase dollar amount for houses creates a larger LOANPRC.
+
+
+#How does gender and race affect loan approval?
+```{r view data}
+
+df %>%  
+  count(RACE, SEX, APPROVE) %>% 
+  group_by(RACE) %>% 
+  mutate(freq = n/sum(n)) %>% 
+  ggplot(aes(x = RACE, y = freq, fill = SEX)) + 
+  geom_bar(stat="identity", position = 'dodge')
+```
+
+#Logit Estimates and Odd Ratios, Probit Estimates
+
+#logit models comparison
+Black only model has only one (meets guidelines) significant variable
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+## all logit models
+m1 <- glm(APPROVE ~ MALE + GDLIN + LOANPRC + OBRAT + MARRIED + BLACK + HISPAN, data = df, family = binomial(link="logit"))
+#Removed Male since there is no significance 
+m2 <- glm(APPROVE ~ GDLIN + LOANPRC + OBRAT + MARRIED + BLACK + HISPAN, data = df, family = binomial(link="logit"))
+# Removed Married since there is small significance
+m3 <- glm(APPROVE ~ GDLIN + LOANPRC + OBRAT + BLACK + HISPAN, data = df, family = binomial(link="logit"))
+#Only WHITE
+white_model <- glm(APPROVE ~ GDLIN + LOANPRC + OBRAT + MARRIED + BLACK + HISPAN, data = white, family = binomial(link="logit"))
+#Only BLACK
+black_model <- glm(APPROVE ~ GDLIN + LOANPRC + OBRAT + MARRIED + BLACK + HISPAN, data = black, family = binomial(link="logit"))
+#Only Hispanics
+his_model <- glm(APPROVE ~ GDLIN + LOANPRC + OBRAT + MARRIED + BLACK + HISPAN, data = hisp, family = binomial(link="logit"))
+
+## view a summary of the Full model
+summary(m1)
+summary(m2)
+summary(m3)
+# White only data
+summary(white_model)
+# Black Only data
+summary(black_model)
+# Hispanic only data
+summary(his_model)
+#Compare the full data set
+anova(m1, m2, m3)
+```
+
+```{r results='asis', echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+#Compare all the models 
+stargazer(m1, m2, m3, white_model, black_model, his_model, type = "text", 
+          column.labels = c("Full Data", "White Only", 
+                            "Black only", "Hispanic Only"), column.separate = c(3, 1,1,1))
+          
+```
+## Odds Ratio for all 6 models
+
+```{r results='asis', echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+OR <- function(x) exp(x)
+stargazer(m1, m2, m3, type="text", apply.coef = OR, 
+          title = "Odds Ratio with full data")
+stargazer(white_model, black_model, his_model, type="text",
+          title = "Odds Ratio with different races",
+          apply.coef = OR, column.labels = c("White Only", 
+                                             "Black Only", "Hispanic Only"))
+stargazer(m1, m2, m3, white_model, black_model, his_model, type="text",
+          title = "Logistic Regression with t stats for significance",
+          report = "vct*", column.labels = c("full Data", "white only",
+                                             "black only", "hispanic only"), 
+          column.separate = c(3, 1,1,1))
+```
+
+```{r results='asis', echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+stargazer(
+exp(cbind(OR = coef(m1), confint(m1))),
+exp(cbind(OR = coef(m2), confint(m2))),
+exp(cbind(OR = coef(m3), confint(m3))),
+exp(cbind(OR = coef(white_model), confint(white_model))),
+exp(cbind(OR = coef(black_model), confint(black_model))),
+exp(cbind(OR = coef(his_model), confint(his_model))),
+type="text")
+
+```
+
+## Likelihood Ratio Test
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+#use full data set the removed male model
+lrtest(m2, m1)
+L1 <- m2$deviance - m1$deviance
+L2 <- (-2*logLik(m2)[1] - (-2*logLik(m1)[1]))
+pchisq(L1, 1, lower.tail = FALSE)
+pchisq(L1, 2, lower.tail = FALSE)
+lrm(m2)
+lrm(m1)
+```
+
+## Visulizing Model Fit Analysis 
+- Model with male and married committed seems to be the best fit among others 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+#FUll data set model 
+par(mfrow=c(2,2))
+plot(m1)
+#Gender excluded
+par(mfrow=c(2,2))
+plot(m2)
+#Gender and Married Excluded
+par(mfrow=c(2,2))
+plot(m3)
+```
+
+## Correctly classified observations
+
+```{r results='asis', echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+###Correctly classified observations
+#we got the same result of 0.924
+stargazer(mean((m1$fitted.values>=0.5)==df$APPROVE),
+mean((m2$fitted.values>=0.5)==df$APPROVE),
+mean((m3$fitted.values>=0.5)==df$APPROVE), type = "text")
+```
+
+## Main Analysis
+Both Probit and Logit prediction shows that Hispanics and Blacks are less likely to get approval to loans when compared to whites
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+#Estimate Logit Model
+
+LogitModel = glm(APPROVE ~ LOANPRC + BLACK + HISPAN, data = df, 
+                 family = "binomial")
+summary(LogitModel)
+
+#Generate Odds Ratios
+
+exp(coef(LogitModel))
+
+#Define prototypical loan applicants
+#for comparison purpose, I set loan amount/purchase price to their respective sample means
+#LOANPRC mean is 77.03%, we can do the same with OBRAT to get a mean of 32.39%
+pro_black <- data.frame(LOANPRC=mean(df$LOANPRC),BLACK = 1, HISPAN = 0)
+pro_his <- data.frame(LOANPRC=mean(df$LOANPRC),BLACK = 0, HISPAN = 1)
+pro_white <- data.frame(LOANPRC=mean(df$LOANPRC),BLACK = 0, HISPAN = 0)
+
+#Predict probabilities for prototypical individuals
+pro_black$predictedprob <- predict (LogitModel, newdata = pro_black, type ="response")
+pro_his$predictedprob <- predict (LogitModel, newdata = pro_his, type ="response")
+pro_white$predictedprob <- predict (LogitModel, newdata = pro_white, type ="response")
+
+#Define prototypical loan applicants (you will need more than 3)
+prototype1 <- data.frame(OBRAT=mean(df$OBRAT),LOANPRC = mean(df$LOANPRC),BLACK = 1, HISPAN = 0, GDLIN = 1, MARRIED = 1)
+prototype2 <- data.frame(OBRAT=mean(df$OBRAT),LOANPRC = mean(df$LOANPRC),BLACK = 0, HISPAN = 1, GDLIN = 1, MARRIED = 1)
+prototype3 <- data.frame(OBRAT=mean(df$OBRAT),LOANPRC = mean(df$LOANPRC),BLACK = 0, HISPAN = 0, GDLIN = 1, MARRIED = 1)
+m2 <- glm(APPROVE ~ GDLIN + LOANPRC + OBRAT + MARRIED + BLACK + HISPAN, data = df, family = binomial(link="probit"))
+#logit Probability
+kable(rbind( pro_black,
+       pro_his,
+       pro_white))
+
+#Estimate Probit Model
+ProbitModel = glm(APPROVE ~ LOANPRC + BLACK + HISPAN, data = df, 
+                  family = "binomial" (link = "probit"))
+summary(ProbitModel)
+
+#Predict probabilities for prototypical individuals
+pro_black$predictedprob <- predict (ProbitModel, newdata = pro_black, type ="response")
+pro_his$predictedprob <- predict (ProbitModel, newdata = pro_his, type ="response")
+pro_white$predictedprob <- predict (ProbitModel, newdata = pro_white, type ="response")
+
+# Probit Probability
+kable(rbind(pro_black,
+      pro_his,
+      pro_white))
+```
+
+#Probit Model Analysis
+#Summary
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=TRUE}
+# to show main effect and relationships/interactions
+# this could be helpful when we start writing out paper, but we should also just stick with our logit model, easier to interpret
+ad <- aov(APPROVE ~ OBRAT * BLACK + HISPAN * OBRAT + LOANPRC * BLACK + LOANPRC * HISPAN, data = df, family = "binomial" (link = "probit"))
+ad2 <- aov(APPROVE ~ OBRAT + BLACK + HISPAN + MARRIED + LOANPRC + GDLIN, data = df, family = "binomial" (link = "probit"))
+summary(ad)
+summary(ad2)
+clean_ad <- broom::tidy(ad)
+kable(clean_ad)
+```
